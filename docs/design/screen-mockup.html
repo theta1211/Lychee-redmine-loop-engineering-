@@ -36,65 +36,10 @@
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --ground: #10131F;
-      --surface: #171C2C;
-      --surface-2: #1E2436;
-      --ink: #EEF0F8;
-      --ink-2: #B0B5CE;
-      --ink-3: #7D84A0;
-      --line: #2A2F45;
-      --line-strong: #3A4059;
-
-      --accent: #FF6A47;
-      --accent-2: #FF8F63;
-      --accent-soft: rgba(255, 106, 71, .15);
-
-      --info: #6E93FF;
-      --info-soft: rgba(110, 147, 255, .16);
-      --ok: #3FD07E;
-      --ok-soft: rgba(63, 208, 126, .15);
-      --warn: #E7B44E;
-      --warn-soft: rgba(231, 180, 78, .15);
-      --crit: #FF6B6B;
-      --crit-soft: rgba(255, 107, 107, .15);
-      --idle: #929AB8;
-      --idle-soft: rgba(146, 154, 184, .14);
-
-      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
-      --shadow-pop: 0 8px 22px rgba(255, 106, 71, .28);
-    }
-  }
-
-  :root[data-theme="dark"] {
-    --ground: #10131F;
-    --surface: #171C2C;
-    --surface-2: #1E2436;
-    --ink: #EEF0F8;
-    --ink-2: #B0B5CE;
-    --ink-3: #7D84A0;
-    --line: #2A2F45;
-    --line-strong: #3A4059;
-
-    --accent: #FF6A47;
-    --accent-2: #FF8F63;
-    --accent-soft: rgba(255, 106, 71, .15);
-
-    --info: #6E93FF;
-    --info-soft: rgba(110, 147, 255, .16);
-    --ok: #3FD07E;
-    --ok-soft: rgba(63, 208, 126, .15);
-    --warn: #E7B44E;
-    --warn-soft: rgba(231, 180, 78, .15);
-    --crit: #FF6B6B;
-    --crit-soft: rgba(255, 107, 107, .15);
-    --idle: #929AB8;
-    --idle-soft: rgba(146, 154, 184, .14);
-
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
-    --shadow-pop: 0 8px 22px rgba(255, 106, 71, .28);
-  }
+  /*
+    このページは「白背景・明るいトーン」を意図的な唯一のデザインとし、
+    OS/ブラウザのダークモード設定に関わらず常に上記のライトパレットで表示する。
+  */
 
   * { box-sizing: border-box; }
 
