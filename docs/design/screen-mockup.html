@@ -1,0 +1,846 @@
+<meta charset="utf-8">
+<title>自動開発ループ コンソール</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F2F5F6;
+    --surface: #FFFFFF;
+    --surface-2: #F8FAFA;
+    --ink: #0E1619;
+    --ink-2: #4B5B63;
+    --ink-3: #78888F;
+    --line: #DEE4E6;
+    --line-strong: #C6D0D4;
+    --accent: #0F5F63;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(15, 95, 99, .09);
+    --ok: #186B47;
+    --ok-soft: rgba(24, 107, 71, .10);
+    --warn: #8A5A06;
+    --warn-soft: rgba(138, 90, 6, .12);
+    --crit: #A62A25;
+    --crit-soft: rgba(166, 42, 37, .09);
+    --idle: #69797F;
+    --idle-soft: rgba(105, 121, 127, .12);
+    --shadow: 0 1px 2px rgba(14, 22, 25, .05);
+    --sans: "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C1214;
+      --surface: #121A1D;
+      --surface-2: #172125;
+      --ink: #E6EDEF;
+      --ink-2: #A5B4BA;
+      --ink-3: #7B8B92;
+      --line: #222E33;
+      --line-strong: #324148;
+      --accent: #57B7BB;
+      --accent-ink: #052220;
+      --accent-soft: rgba(87, 183, 187, .14);
+      --ok: #62C08D;
+      --ok-soft: rgba(98, 192, 141, .14);
+      --warn: #D5A44F;
+      --warn-soft: rgba(213, 164, 79, .14);
+      --crit: #E38179;
+      --crit-soft: rgba(227, 129, 121, .13);
+      --idle: #8B9BA2;
+      --idle-soft: rgba(139, 155, 162, .14);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C1214;
+    --surface: #121A1D;
+    --surface-2: #172125;
+    --ink: #E6EDEF;
+    --ink-2: #A5B4BA;
+    --ink-3: #7B8B92;
+    --line: #222E33;
+    --line-strong: #324148;
+    --accent: #57B7BB;
+    --accent-ink: #052220;
+    --accent-soft: rgba(87, 183, 187, .14);
+    --ok: #62C08D;
+    --ok-soft: rgba(98, 192, 141, .14);
+    --warn: #D5A44F;
+    --warn-soft: rgba(213, 164, 79, .14);
+    --crit: #E38179;
+    --crit-soft: rgba(227, 129, 121, .13);
+    --idle: #8B9BA2;
+    --idle-soft: rgba(139, 155, 162, .14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  /* ---------- shell ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .rail {
+    border-right: 1px solid var(--line);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 18px 14px;
+  }
+
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+  .brand-mark {
+    width: 28px; height: 28px; display: grid; place-items: center;
+    border: 1px solid var(--accent); border-radius: 7px;
+    color: var(--accent); font-size: 15px; line-height: 1;
+    background: var(--accent-soft);
+  }
+  .brand-name { display: flex; flex-direction: column; line-height: 1.25; }
+  .brand-name b { font-size: 13.5px; font-weight: 600; letter-spacing: .01em; }
+  .brand-name span { font-size: 10.5px; color: var(--ink-3); letter-spacing: .06em; }
+
+  .rail nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav-item {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    text-align: left; padding: 8px 10px; border-radius: 6px;
+    font-size: 13px; color: var(--ink-2);
+    display: flex; align-items: center; gap: 9px;
+    transition: background .12s ease, color .12s ease;
+  }
+  .nav-item::before {
+    content: ""; width: 2px; height: 13px; border-radius: 1px;
+    background: transparent; transition: background .12s ease;
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item[aria-current="page"] { color: var(--ink); font-weight: 500; background: var(--accent-soft); }
+  .nav-item[aria-current="page"]::before { background: var(--accent); }
+
+  .rail-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 7px; }
+  .rail-foot .eyebrow { font-size: 10px; letter-spacing: .1em; color: var(--ink-3); margin-bottom: 2px; }
+  .meta-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11.5px; color: var(--ink-3); }
+  .meta-row b { color: var(--ink-2); font-weight: 500; font-size: 11.5px; }
+
+  main { min-width: 0; display: flex; flex-direction: column; }
+
+  .topbar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px;
+    padding: 11px 22px;
+  }
+  .topbar h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+  .topbar .spacer { margin-left: auto; }
+  .mock-badge {
+    font-size: 10.5px; letter-spacing: .05em; color: var(--ink-3);
+    border: 1px dashed var(--line-strong); border-radius: 4px; padding: 2px 7px;
+  }
+
+  .runstate { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+  .runstate .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .runstate.paused .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+
+  .screen { padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+  .screen[hidden] { display: none; }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    appearance: none; cursor: pointer; border-radius: 6px;
+    border: 1px solid var(--line-strong); background: var(--surface);
+    color: var(--ink); padding: 0 12px; height: 32px;
+    font-size: 12.5px; font-weight: 500; letter-spacing: .01em;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--ink-3); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.07); }
+  .btn.quiet { border-color: transparent; background: transparent; color: var(--ink-2); padding: 0 8px; }
+  .btn.quiet:hover { background: var(--surface-2); color: var(--ink); }
+  .btn.danger:hover { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  .btn.sm { height: 26px; font-size: 11.5px; padding: 0 9px; }
+
+  /* ---------- section frame ---------- */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .panel-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .panel-title { margin: 0; font-size: 13px; font-weight: 600; }
+  .panel-note { font-size: 11.5px; color: var(--ink-3); }
+
+  .tabs { display: inline-flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+  .tab {
+    appearance: none; border: 0; background: none; cursor: pointer;
+    font-size: 12.5px; color: var(--ink-2); padding: 4px 12px; border-radius: 5px;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .tab .count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+  .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: var(--shadow); }
+  .tab[aria-selected="true"] .count { color: var(--accent); }
+
+  /* ---------- add bar ---------- */
+  .addbar {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    padding: 13px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line);
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 10.5px; letter-spacing: .06em; color: var(--ink-3); }
+  .field input, .field select {
+    font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px;
+    height: 32px; padding: 0 9px; min-width: 132px;
+  }
+  .field input { font-family: var(--mono); width: 116px; min-width: 0; }
+  .field-error { font-size: 11.5px; color: var(--crit); }
+
+  /* ---------- table ---------- */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  thead th {
+    text-align: left; font-size: 10.5px; font-weight: 500; letter-spacing: .08em;
+    color: var(--ink-3); padding: 9px 12px; background: var(--surface);
+    border-bottom: 1px solid var(--line-strong); white-space: nowrap;
+  }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--surface-2); }
+  .col-grip { width: 46px; }
+  .col-actions { text-align: right; white-space: nowrap; }
+
+  .grip {
+    display: inline-flex; align-items: center; gap: 7px; color: var(--ink-3);
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  .grip i {
+    width: 7px; height: 12px; cursor: grab;
+    background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1px);
+    background-size: 3.5px 3.5px;
+  }
+
+  .tno { font-family: var(--mono); font-size: 12.5px; color: var(--accent); text-decoration: none; }
+  .tno:hover { text-decoration: underline; }
+  .ttitle { appearance: none; border: 0; background: none; padding: 0; cursor: pointer; font-size: 13px; text-align: left; }
+  .ttitle:hover { text-decoration: underline; }
+  .cell-sub { font-size: 11px; color: var(--ink-3); }
+  .model { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  .model.is-default::after { content: " 既定"; font-family: var(--sans); font-size: 10px; color: var(--ink-3); }
+  .user { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+
+  /* ---------- status ---------- */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 8px;
+    border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .pill.waiting { color: var(--idle); background: var(--idle-soft); border-color: color-mix(in srgb, var(--idle) 22%, transparent); }
+  .pill.running { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .pill.aborting { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 25%, transparent); }
+  .pill.needs_human { color: var(--crit); background: var(--crit-soft); border-color: color-mix(in srgb, var(--crit) 25%, transparent); }
+  .pill.pushed { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 22%, transparent); }
+  .pill.canceled { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 22%, transparent); }
+  .retry { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+
+  .banner {
+    display: flex; align-items: center; gap: 10px; padding: 9px 16px;
+    background: var(--warn-soft); border-bottom: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
+    font-size: 12.5px; color: var(--warn);
+  }
+
+  /* ---------- detail ---------- */
+  .detail-head { padding: 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+  .detail-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .detail-title h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .01em; }
+  .detail-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px 20px; }
+  .detail-meta div { display: flex; flex-direction: column; gap: 1px; }
+  .detail-meta dt { font-size: 10.5px; letter-spacing: .06em; color: var(--ink-3); }
+  .detail-meta dd { margin: 0; font-size: 12.5px; font-family: var(--mono); color: var(--ink-2); }
+  .detail-error { font-size: 12px; color: var(--crit); background: var(--crit-soft); border-left: 2px solid var(--crit); padding: 7px 10px; }
+
+  .log { padding: 4px 0; }
+  .log-row {
+    display: grid; grid-template-columns: 66px 78px minmax(0, 1fr);
+    gap: 12px; padding: 7px 16px; align-items: start;
+  }
+  .log-row + .log-row { border-top: 1px solid var(--line); }
+  .log-time { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); padding-top: 2px; }
+  .phase {
+    font-size: 10.5px; letter-spacing: .04em; text-align: center;
+    border-radius: 4px; padding: 2px 0; border: 1px solid transparent; margin-top: 1px;
+  }
+  .phase.implement { color: var(--ink-2); background: var(--idle-soft); border-color: color-mix(in srgb, var(--idle) 20%, transparent); }
+  .phase.review { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .phase.retry { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 22%, transparent); }
+  .phase.push { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 22%, transparent); }
+  .phase.timeout, .phase.error { color: var(--crit); background: var(--crit-soft); border-color: color-mix(in srgb, var(--crit) 22%, transparent); }
+  .phase.abort, .phase.recover { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 22%, transparent); }
+  .log-body { font-size: 12.5px; color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+  .verdict { font-family: var(--mono); font-size: 11.5px; padding: 1px 5px; border-radius: 3px; }
+  .verdict.fail { color: var(--crit); background: var(--crit-soft); }
+  .verdict.pass { color: var(--ok); background: var(--ok-soft); }
+  .log-empty { padding: 26px 16px; text-align: center; color: var(--ink-3); font-size: 12.5px; }
+
+  /* ---------- settings ---------- */
+  .form-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 16px;
+    align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line);
+  }
+  .form-row .label { font-size: 13px; }
+  .form-row .hint { font-size: 11.5px; color: var(--ink-3); }
+  .form-row select, .form-row input {
+    font: inherit; font-size: 13px; color: var(--ink); width: 100%;
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px;
+    height: 32px; padding: 0 9px;
+  }
+  .form-row input { font-family: var(--mono); }
+  .unit { display: flex; align-items: center; gap: 8px; }
+  .unit span { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+  .form-foot { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .saved { font-size: 12px; color: var(--ok); }
+
+  .refs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 24px; padding: 14px 16px; }
+  .refs div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .refs dt { font-size: 10.5px; letter-spacing: .06em; color: var(--ink-3); }
+  .refs dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+  .locktag { font-size: 10px; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 3px; padding: 1px 5px; }
+
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    background: var(--ink); color: var(--ground);
+    font-size: 12.5px; padding: 8px 14px; border-radius: 7px; z-index: 50;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+  }
+  .toast[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .rail { border-right: 0; border-bottom: 1px solid var(--line); flex-direction: row; align-items: center; gap: 14px; overflow-x: auto; padding: 10px 16px; }
+    .rail nav { flex-direction: row; }
+    .rail-foot { display: none; }
+    .screen { padding: 16px; }
+    .topbar { padding: 10px 16px; flex-wrap: wrap; }
+    .form-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .log-row { grid-template-columns: 62px minmax(0, 1fr); }
+    .log-row .phase { grid-column: 2; justify-self: start; padding: 2px 8px; }
+    .log-row .log-body { grid-column: 2; }
+  }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">↻</span>
+      <span class="brand-name">
+        <b>自動開発ループ</b>
+        <span>REDMINE / COPILOT CLI</span>
+      </span>
+    </div>
+
+    <nav aria-label="画面">
+      <button class="nav-item" data-screen="queue" aria-current="page">キュー / 履歴</button>
+      <button class="nav-item" data-screen="detail">チケット詳細</button>
+      <button class="nav-item" data-screen="settings">設定</button>
+    </nav>
+
+    <div class="rail-foot">
+      <p class="eyebrow">実行エンジン</p>
+      <div class="meta-row"><span>状態</span><b id="engine-state">実行中</b></div>
+      <div class="meta-row"><span>PID</span><b class="mono">1234</b></div>
+      <div class="meta-row"><span>ハートビート</span><b class="mono">18:31:02</b></div>
+      <div class="meta-row"><span>次回起動</span><b class="mono">19:00</b></div>
+      <div class="meta-row"><span>起動間隔</span><b class="mono">30分</b></div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <h1 id="screen-label">キュー / 履歴</h1>
+      <span class="mock-badge">モックアップ・サンプルデータ</span>
+      <span class="spacer"></span>
+      <span class="runstate" id="runstate"><span class="dot"></span><span id="runstate-text">キュー稼働中</span></span>
+      <button class="btn" id="pause-toggle">キューを一時停止する</button>
+    </header>
+
+    <!-- ============ 画面1：キュー / 履歴 ============ -->
+    <section class="screen" id="screen-queue">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" id="tab-queue" aria-selected="true" aria-controls="pane-queue">キュー <span class="count" id="count-queue">4</span></button>
+            <button class="tab" role="tab" id="tab-history" aria-selected="false" aria-controls="pane-history">履歴 <span class="count" id="count-history">4</span></button>
+          </div>
+          <span class="spacer"></span>
+          <span class="panel-note">上から順に1件ずつ実行されます</span>
+        </div>
+
+        <div class="banner" id="pause-banner" hidden>
+          キューは一時停止中です。実行中のチケットは最後まで処理され、次のチケットには着手しません。
+        </div>
+
+        <div id="pane-queue" role="tabpanel" aria-labelledby="tab-queue">
+          <form class="addbar" id="add-form">
+            <div class="field">
+              <label for="add-no">チケット番号</label>
+              <input id="add-no" name="no" inputmode="numeric" placeholder="1242" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="add-impl">実装AIモデル</label>
+              <select id="add-impl" name="impl">
+                <option value="">既定（gpt-4o）</option>
+                <option>gpt-4o</option>
+                <option>claude-sonnet</option>
+                <option>o4-mini</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="add-review">レビューAIモデル</label>
+              <select id="add-review" name="review">
+                <option value="">既定（gpt-4o）</option>
+                <option>gpt-4o</option>
+                <option>claude-sonnet</option>
+                <option>o4-mini</option>
+              </select>
+            </div>
+            <button class="btn primary" type="submit">キューに追加</button>
+            <span class="field-error" id="add-error" hidden>チケット番号を入力してください</span>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-grip">順序</th>
+                  <th>番号</th>
+                  <th>タイトル</th>
+                  <th>状態</th>
+                  <th>実装AI</th>
+                  <th>レビューAI</th>
+                  <th>登録者</th>
+                  <th class="col-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody id="queue-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="pane-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>番号</th>
+                  <th>タイトル</th>
+                  <th>状態</th>
+                  <th>ブランチ</th>
+                  <th>終了日時</th>
+                  <th class="col-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody id="history-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 画面2：チケット詳細 / ログ ============ -->
+    <section class="screen" id="screen-detail" hidden>
+      <div class="panel">
+        <div class="detail-head">
+          <div class="detail-title">
+            <button class="btn quiet sm" id="back-to-list">← 一覧に戻る</button>
+            <h2 id="d-title">CSV出力の文字化けを修正</h2>
+            <span id="d-pill"></span>
+            <span class="spacer"></span>
+            <button class="btn danger" id="d-abort">強制中断</button>
+          </div>
+          <dl class="detail-meta">
+            <div><dt>チケット</dt><dd id="d-no">#1235</dd></div>
+            <div><dt>ブランチ</dt><dd id="d-branch">ticket/1235</dd></div>
+            <div><dt>実装AI</dt><dd id="d-impl">gpt-4o</dd></div>
+            <div><dt>レビューAI</dt><dd id="d-review">claude-sonnet</dd></div>
+            <div><dt>再実装回数</dt><dd id="d-retry">2 / 3</dd></div>
+            <div><dt>登録者</dt><dd id="d-by">DOMAIN\suzuki</dd></div>
+            <div><dt>開始日時</dt><dd id="d-started">09/15 18:05</dd></div>
+          </dl>
+          <p class="detail-error" id="d-error" hidden></p>
+        </div>
+        <div class="log" id="d-log"></div>
+      </div>
+    </section>
+
+    <!-- ============ 画面3：設定 ============ -->
+    <section class="screen" id="screen-settings" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">実行設定</h2>
+          <span class="panel-note">変更は保存後に開始される処理から反映されます（実行中のチケットには適用されません）</span>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="label">デフォルト実装AIモデル</div>
+            <div class="hint">チケットごとに個別指定がない場合に使用します</div>
+          </div>
+          <select id="set-impl">
+            <option selected>gpt-4o</option>
+            <option>claude-sonnet</option>
+            <option>o4-mini</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="label">デフォルトレビューAIモデル</div>
+            <div class="hint">実装とは別のモデルを指定すると、観点の偏りを減らせます</div>
+          </div>
+          <select id="set-review">
+            <option selected>gpt-4o</option>
+            <option>claude-sonnet</option>
+            <option>o4-mini</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="label">再実装ループの上限回数</div>
+            <div class="hint">レビューNGで差し戻す回数の上限。超えると「要確認（人対応）」になります</div>
+          </div>
+          <div class="unit"><input id="set-retry" value="3" inputmode="numeric"><span>回</span></div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="label">実装フェーズのタイムアウト</div>
+            <div class="hint">超過した場合はプロセスを停止し、変更をWIPコミットで退避します</div>
+          </div>
+          <div class="unit"><input id="set-impl-timeout" value="30" inputmode="numeric"><span>分</span></div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="label">レビューフェーズのタイムアウト</div>
+            <div class="hint">同上。レビューは実装より短めに設定します</div>
+          </div>
+          <div class="unit"><input id="set-review-timeout" value="10" inputmode="numeric"><span>分</span></div>
+        </div>
+
+        <div class="form-foot">
+          <button class="btn primary" id="save-settings">設定を保存</button>
+          <span class="saved" id="saved-msg" hidden>保存しました</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">接続情報</h2>
+          <span class="locktag">画面からは変更不可</span>
+          <span class="spacer"></span>
+          <span class="panel-note">config/config.json で管理します</span>
+        </div>
+        <dl class="refs">
+          <div><dt>REDMINE URL</dt><dd>https://redmine.example.co.jp</dd></div>
+          <div><dt>対象リポジトリ</dt><dd>C:\repos\target-app</dd></div>
+          <div><dt>ベースブランチ</dt><dd>main</dd></div>
+          <div><dt>実行ユーザー</dt><dd>DOMAIN\svc-devloop</dd></div>
+        </dl>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+  const STATUS = {
+    waiting:     { label: "待機中" },
+    running:     { label: "実行中" },
+    aborting:    { label: "中断要求中" },
+    needs_human: { label: "要確認（人対応）" },
+    pushed:      { label: "完了（プッシュ済み）" },
+    canceled:    { label: "中断済み" }
+  };
+
+  const queue = [
+    { id: 11, no: "1235", title: "CSV出力の文字化けを修正", status: "running", retry: 2, impl: "gpt-4o", review: "claude-sonnet", by: "DOMAIN\\suzuki", at: "09/15 18:05" },
+    { id: 12, no: "1234", title: "ログイン画面の入力チェックを追加", status: "waiting", retry: 0, impl: null, review: null, by: "DOMAIN\\sato", at: "09/15 18:02" },
+    { id: 13, no: "1238", title: "検索条件をセッションに保持する", status: "waiting", retry: 0, impl: "claude-sonnet", review: null, by: "DOMAIN\\sato", at: "09/15 18:14" },
+    { id: 14, no: "1240", title: "日次バッチのリトライ処理を実装", status: "waiting", retry: 0, impl: null, review: "claude-sonnet", by: "DOMAIN\\tanaka", at: "09/15 19:40" }
+  ];
+
+  const history = [
+    { id: 7, no: "1231", title: "一覧のページングが2ページ目以降でずれる", status: "needs_human", retry: 3, impl: "gpt-4o", review: "gpt-4o", by: "DOMAIN\\sato", branch: "ticket/1231", end: "09/14 23:10", error: "再実装ループが上限（3回）に達しました。作業内容は [WIP] #1231 として ticket/1231 に退避済みです。" },
+    { id: 6, no: "1230", title: "パスワード変更APIを追加", status: "pushed", retry: 1, impl: "gpt-4o", review: "claude-sonnet", by: "DOMAIN\\suzuki", branch: "ticket/1230", end: "09/14 21:30", error: null },
+    { id: 5, no: "1229", title: "依存ライブラリを最新化", status: "pushed", retry: 0, impl: "gpt-4o", review: "gpt-4o", by: "DOMAIN\\tanaka", branch: "ticket/1229", end: "09/14 20:12", error: null },
+    { id: 4, no: "1226", title: "権限チェックを共通処理に切り出す", status: "canceled", retry: 1, impl: "claude-sonnet", review: "gpt-4o", by: "DOMAIN\\sato", branch: "ticket/1226", end: "09/13 22:48", error: "利用者の操作により中断しました。作業内容は [WIP] #1226 として退避済みです。" }
+  ];
+
+  const logs = {
+    11: [
+      ["18:05:01", "implement", "実装AI（gpt-4o）を起動しました。ticket/1235 を作成。"],
+      ["18:07:30", "review", "<span class='verdict fail'>RESULT: FAIL</span> Shift_JIS 変換時に BOM が付与されていません。回帰テストも未追加です。"],
+      ["18:07:31", "retry", "retryCount 1/3。指摘内容を実装AIへ渡します。"],
+      ["18:09:10", "implement", "CsvExporter に BOM 付与処理を追加し、ExportServiceTest を更新。"],
+      ["18:11:44", "review", "<span class='verdict fail'>RESULT: FAIL</span> BOM は付与されたが、既存の Shift_JIS 出力に対する回帰テストがありません。"],
+      ["18:11:45", "retry", "retryCount 2/3。指摘内容を実装AIへ渡します。"],
+      ["18:13:02", "implement", "実装AIが修正中です…"]
+    ],
+    7: [
+      ["22:41:08", "implement", "実装AI（gpt-4o）を起動しました。ticket/1231 を作成。"],
+      ["22:48:20", "review", "<span class='verdict fail'>RESULT: FAIL</span> offset の計算がページ番号1始まりの前提になっていません。"],
+      ["22:48:21", "retry", "retryCount 1/3。指摘内容を実装AIへ渡します。"],
+      ["22:56:10", "review", "<span class='verdict fail'>RESULT: FAIL</span> 修正されたが、件数0件のときに例外が発生します。"],
+      ["22:56:11", "retry", "retryCount 2/3。指摘内容を実装AIへ渡します。"],
+      ["23:09:52", "review", "<span class='verdict fail'>RESULT: FAIL</span> 0件は解消。ただしソート指定時に重複行が返ります。"],
+      ["23:10:03", "error", "再実装ループが上限（3回）に達しました。[WIP] #1231 としてコミットし退避。"],
+      ["23:10:05", "error", "Redmine #1231 に「要確認（人対応）」コメントを登録しました。"]
+    ],
+    6: [
+      ["21:12:40", "implement", "実装AI（gpt-4o）を起動しました。ticket/1230 を作成。"],
+      ["21:21:15", "review", "<span class='verdict fail'>RESULT: FAIL</span> 現行パスワードの検証が実装されていません。"],
+      ["21:21:16", "retry", "retryCount 1/3。指摘内容を実装AIへ渡します。"],
+      ["21:28:44", "review", "<span class='verdict pass'>RESULT: PASS</span> 検証・テストとも問題ありません。"],
+      ["21:30:02", "push", "[#1230] パスワード変更APIを追加 をコミットし、origin/ticket/1230 へプッシュしました。"],
+      ["21:30:04", "push", "Redmine #1230 に完了コメント（ブランチ名・PR作成の案内）を登録しました。"]
+    ],
+    5: [
+      ["20:02:11", "implement", "実装AI（gpt-4o）を起動しました。ticket/1229 を作成。"],
+      ["20:10:36", "review", "<span class='verdict pass'>RESULT: PASS</span> 破壊的変更なし。ビルド・テストとも通過。"],
+      ["20:12:20", "push", "[#1229] 依存ライブラリを最新化 をコミットし、origin/ticket/1229 へプッシュしました。"]
+    ],
+    4: [
+      ["22:30:05", "implement", "実装AI（claude-sonnet）を起動しました。ticket/1226 を作成。"],
+      ["22:39:48", "review", "<span class='verdict fail'>RESULT: FAIL</span> 共通化の範囲が広すぎ、既存の呼び出し元3箇所に影響します。"],
+      ["22:39:49", "retry", "retryCount 1/3。指摘内容を実装AIへ渡します。"],
+      ["22:47:52", "abort", "中断要求を検知しました。実装AIのプロセスを停止します。"],
+      ["22:48:10", "abort", "[WIP] #1226 としてコミットし、作業ツリーを退避しました。"]
+    ]
+  };
+
+  const PHASE_LABEL = {
+    implement: "実装", review: "レビュー", retry: "差し戻し", push: "プッシュ",
+    timeout: "タイムアウト", error: "エラー", abort: "中断", recover: "復旧"
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function pill(status, retry) {
+    const extra = status === "running" && retry > 0 ? `<span class="retry">${retry} / 3</span>` : "";
+    return `<span class="pill ${status}">${STATUS[status].label}</span>${extra}`;
+  }
+
+  function modelCell(value) {
+    return value
+      ? `<span class="model">${esc(value)}</span>`
+      : `<span class="model is-default">gpt-4o</span>`;
+  }
+
+  function renderQueue() {
+    $("#queue-body").innerHTML = queue.map((t, i) => `
+      <tr data-id="${t.id}">
+        <td class="col-grip"><span class="grip"><i aria-hidden="true"></i>${i + 1}</span></td>
+        <td><a class="tno" href="#" onclick="return false">#${t.no}</a></td>
+        <td>
+          <button class="ttitle" data-open="${t.id}">${esc(t.title)}</button>
+          <div class="cell-sub">${t.at} 登録</div>
+        </td>
+        <td>${pill(t.status, t.retry)}</td>
+        <td>${modelCell(t.impl)}</td>
+        <td>${modelCell(t.review)}</td>
+        <td><span class="user">${esc(t.by)}</span></td>
+        <td class="col-actions">
+          ${t.status === "waiting"
+            ? `<button class="btn sm danger" data-del="${t.id}">削除</button>`
+            : `<button class="btn sm danger" data-abort="${t.id}">中断</button>
+               <button class="btn sm" data-open="${t.id}">詳細</button>`}
+        </td>
+      </tr>`).join("");
+    $("#count-queue").textContent = queue.length;
+  }
+
+  function renderHistory() {
+    $("#history-body").innerHTML = history.map((t) => `
+      <tr data-id="${t.id}">
+        <td><a class="tno" href="#" onclick="return false">#${t.no}</a></td>
+        <td><button class="ttitle" data-open="${t.id}">${esc(t.title)}</button></td>
+        <td>${pill(t.status, 0)}</td>
+        <td><span class="model">${esc(t.branch)}</span></td>
+        <td><span class="model">${t.end}</span></td>
+        <td class="col-actions">
+          <button class="btn sm" data-open="${t.id}">詳細</button>
+          <button class="btn sm danger" data-del="${t.id}">削除</button>
+        </td>
+      </tr>`).join("");
+    $("#count-history").textContent = history.length;
+  }
+
+  function showScreen(name) {
+    const labels = { queue: "キュー / 履歴", detail: "チケット詳細", settings: "設定" };
+    ["queue", "detail", "settings"].forEach((s) => { $("#screen-" + s).hidden = s !== name; });
+    document.querySelectorAll(".nav-item").forEach((b) => {
+      if (b.dataset.screen === name) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+    $("#screen-label").textContent = labels[name];
+    window.scrollTo({ top: 0 });
+  }
+
+  function openDetail(id) {
+    const t = queue.concat(history).find((x) => x.id === id);
+    if (!t) return;
+    $("#d-title").textContent = t.title;
+    $("#d-pill").innerHTML = pill(t.status, t.status === "running" ? t.retry : 0);
+    $("#d-no").textContent = "#" + t.no;
+    $("#d-branch").textContent = t.branch || ("ticket/" + t.no);
+    $("#d-impl").textContent = t.impl || "gpt-4o（既定）";
+    $("#d-review").textContent = t.review || "gpt-4o（既定）";
+    $("#d-retry").textContent = t.retry + " / 3";
+    $("#d-by").textContent = t.by;
+    $("#d-started").textContent = t.at || t.end || "—";
+    $("#d-abort").hidden = t.status !== "running";
+
+    const err = $("#d-error");
+    err.hidden = !t.error;
+    if (t.error) err.textContent = t.error;
+
+    const entries = logs[t.id];
+    $("#d-log").innerHTML = entries && entries.length
+      ? entries.map(([time, phase, body]) => `
+          <div class="log-row">
+            <div class="log-time">${time}</div>
+            <div class="phase ${phase}">${PHASE_LABEL[phase]}</div>
+            <div class="log-body">${body}</div>
+          </div>`).join("")
+      : `<p class="log-empty">まだ実行されていないため、ログはありません。</p>`;
+
+    $("#d-log").dataset.ticket = id;
+    showScreen("detail");
+  }
+
+  let toastTimer;
+  function toast(message) {
+    const el = $("#toast");
+    el.textContent = message;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  }
+
+  document.addEventListener("click", (e) => {
+    const nav = e.target.closest(".nav-item");
+    if (nav) return showScreen(nav.dataset.screen);
+
+    const open = e.target.closest("[data-open]");
+    if (open) return openDetail(Number(open.dataset.open));
+
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      const id = Number(del.dataset.del);
+      const qi = queue.findIndex((t) => t.id === id);
+      if (qi > -1) { queue.splice(qi, 1); renderQueue(); }
+      const hi = history.findIndex((t) => t.id === id);
+      if (hi > -1) { history.splice(hi, 1); renderHistory(); }
+      return toast("チケットを一覧から削除しました");
+    }
+
+    const ab = e.target.closest("[data-abort]");
+    if (ab) return requestAbort(Number(ab.dataset.abort));
+  });
+
+  function requestAbort(id) {
+    const t = queue.find((x) => x.id === id);
+    if (!t || t.status !== "running") return;
+    t.status = "aborting";
+    renderQueue();
+    if (!$("#screen-detail").hidden && Number($("#d-log").dataset.ticket) === id) {
+      $("#d-pill").innerHTML = pill("aborting", 0);
+      $("#d-abort").hidden = true;
+    }
+    toast("中断を要求しました。実行エンジンが最大5秒以内に検知します");
+  }
+
+  $("#d-abort").addEventListener("click", () => requestAbort(Number($("#d-log").dataset.ticket)));
+  $("#back-to-list").addEventListener("click", () => showScreen("queue"));
+
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const isQueue = tab.id === "tab-queue";
+      $("#tab-queue").setAttribute("aria-selected", String(isQueue));
+      $("#tab-history").setAttribute("aria-selected", String(!isQueue));
+      $("#pane-queue").hidden = !isQueue;
+      $("#pane-history").hidden = isQueue;
+    });
+  });
+
+  let paused = false;
+  $("#pause-toggle").addEventListener("click", () => {
+    paused = !paused;
+    $("#pause-toggle").textContent = paused ? "キューを再開する" : "キューを一時停止する";
+    $("#runstate").classList.toggle("paused", paused);
+    $("#runstate-text").textContent = paused ? "キュー一時停止中" : "キュー稼働中";
+    $("#engine-state").textContent = paused ? "待機（停止中）" : "実行中";
+    $("#pause-banner").hidden = !paused;
+  });
+
+  $("#add-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const no = $("#add-no").value.trim();
+    const err = $("#add-error");
+    if (!/^\d+$/.test(no)) {
+      err.hidden = false;
+      err.textContent = no ? "チケット番号は数字で入力してください" : "チケット番号を入力してください";
+      $("#add-no").focus();
+      return;
+    }
+    if (queue.some((t) => t.no === no)) {
+      err.hidden = false;
+      err.textContent = "このチケットはすでにキューにあります";
+      return;
+    }
+    err.hidden = true;
+    queue.push({
+      id: Date.now(), no, title: "（Redmineから件名を取得します）", status: "waiting", retry: 0,
+      impl: $("#add-impl").value || null, review: $("#add-review").value || null,
+      by: "DOMAIN\\sato", at: "09/15 19:52"
+    });
+    $("#add-form").reset();
+    renderQueue();
+    toast(`#${no} をキューの末尾に追加しました`);
+  });
+
+  $("#save-settings").addEventListener("click", () => {
+    $("#saved-msg").hidden = false;
+    setTimeout(() => { $("#saved-msg").hidden = true; }, 2400);
+  });
+
+  renderQueue();
+  renderHistory();
+  openDetail(11);
+  showScreen("queue");
+</script>
