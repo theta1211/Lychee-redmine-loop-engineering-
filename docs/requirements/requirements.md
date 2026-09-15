@@ -93,5 +93,9 @@ Windowsのタスクスケジューラが定期的に起動する実行エンジ�
 - Redmineコメント以外の通知（メール・チャット通知等）。
 
 ## 8. 詳細設計
-技術スタック・DB設計・画面設計・処理フロー等の詳細は
-`docs/design/detailed-design.md` を参照。
+技術スタック・データ設計・連携仕様等の詳細は `docs/design/` 配下を参照。
+- `detailed-design.md`：全体概要・データ設計・連携仕様・非機能設計
+- `architecture.md`：システム構成図
+- `sequence.md`：シーケンス図
+- `screen-spec.md`：画面仕様
+- `api-design.md`：API設計書
