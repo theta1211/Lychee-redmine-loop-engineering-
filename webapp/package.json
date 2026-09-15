@@ -1,0 +1,27 @@
+{
+  "name": "@devloop/webapp",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && npm run copy:public",
+    "copy:public": "node -e \"const fs=require('fs');fs.cpSync('src/public','dist/public',{recursive:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "ts-node src/server.ts",
+    "start": "node dist/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@devloop/shared": "*",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

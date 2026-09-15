@@ -1,0 +1,22 @@
+{
+  "name": "@devloop/engine",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/run.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "ts-node src/run.ts",
+    "start": "node dist/run.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@devloop/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

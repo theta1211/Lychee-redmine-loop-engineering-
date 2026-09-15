@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 実行時に生成されるデータ・機微情報（雛形のみコミットする）
+data/queue.json
+data/settings.json
+data/logs/*.jsonl
+config/config.json
+
+npm-debug.log*
+.DS_Store

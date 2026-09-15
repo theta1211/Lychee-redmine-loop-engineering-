@@ -1,0 +1,22 @@
+{
+  "redmine": {
+    "url": "https://redmine.example.co.jp",
+    "apiKey": "REPLACE_WITH_YOUR_REDMINE_API_KEY"
+  },
+  "git": {
+    "repoPath": "C:\\repos\\target-app",
+    "baseBranch": "main",
+    "remote": "origin"
+  },
+  "copilot": {
+    "command": "copilot",
+    "extraArgs": [],
+    "mock": false
+  },
+  "runner": {
+    "staleThresholdMinutes": 5,
+    "heartbeatIntervalSeconds": 30,
+    "abortPollIntervalSeconds": 5
+  },
+  "dataDir": "./data"
+}
