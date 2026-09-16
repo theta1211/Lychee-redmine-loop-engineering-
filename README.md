@@ -10,6 +10,8 @@ Redmineのチケット番号をWeb画面で指定しておくと、Windowsのタ
 - 画面仕様: [`docs/design/screen-spec.md`](docs/design/screen-spec.md)（[HTMLモック](docs/design/screen-mockup.html)あり）
 - API設計書: [`docs/design/api-design.md`](docs/design/api-design.md)
 - 詳細設計（データ設計・連携仕様・非機能設計）: [`docs/design/detailed-design.md`](docs/design/detailed-design.md)
+- **Windows環境構築ガイド（前提ソフトウェア・自動セットアップ・動作確認・トラブルシューティング）**:
+  [`docs/setup/windows-setup.md`](docs/setup/windows-setup.md)
 
 ## リポジトリ構成
 
@@ -20,6 +22,8 @@ engine/    実行エンジン（タスクスケジューラから起動するCLI
 config/    設定ファイルの雛形（実際の config.json は.gitignore対象）
 data/      実行時に生成されるキュー/設定/ログ（.gitignore対象、logs/.gitkeepのみ管理）
 docs/      要件定義・詳細設計ドキュメント
+scripts/   Windows環境構築用のPowerShellスクリプト（setup.batから呼び出される）
+setup.bat  Windows向けの対話式セットアップ（依存関係インストール〜IIS〜タスク登録）
 ```
 
 DBは使用せず、`data/queue.json` / `data/settings.json` / `data/logs/{チケットID}.jsonl` の
@@ -82,25 +86,34 @@ npm test        # 全workspace（shared/webapp/engine）のvitestを実行
 npm run typecheck
 ```
 
-## 本番デプロイの流れ（概要）
+## Windows本番環境への導入
 
-1. Windows上に実行エンジン専用ユーザーを作成し、そのユーザーでログインして
-   GitHub Copilot CLIの認証・Gitの認証情報（Credential Manager等）を済ませる。
-2. `npm install && npm run build` で `webapp/dist` `engine/dist` `shared/dist` を生成する。
-3. IISでWeb管理アプリをホストし、Windows認証を有効化する。IISのURL Rewrite等で
-   認証済みユーザー名を `X-Remote-User` ヘッダーとしてアプリへ転送するよう構成する
-   （`webapp/src/auth.ts` 参照）。このヘッダーは自己申告なので、**クライアントが送ってきた
-   同名ヘッダーは必ずIIS側で破棄・上書きする**こと。Nodeプロセスは既定でループバック
-   （127.0.0.1）のみ待ち受けるため、LANからはIIS経由でしか到達できない。
-4. Windowsタスクスケジューラに、手順1のユーザーで `node engine/dist/run.js` を
-   一定間隔（既定30分）で実行するタスクを登録する。実行時は`DEVLOOP_CONFIG_PATH`環境変数
-   （未設定時は`config/config.json`）で設定ファイルの場所を指定できる。
-5. Web画面からRedmineチケット番号を登録し、動作を確認する。
+対話式の `setup.bat`（リポジトリ直下）で、依存関係のインストール〜ビルド〜
+config.json作成〜IISサイト構築〜タスクスケジューラ登録までを行える。
+IIS・タスクスケジューラの操作は管理者権限が必要なため、`setup.bat`を
+「管理者として実行」で起動すること。
+
+手順・前提ソフトウェア・動作確認チェックリスト・トラブルシューティングの詳細は
+**[`docs/setup/windows-setup.md`](docs/setup/windows-setup.md)** を参照。
+
+概要（`setup.bat`が内部で行うこと）:
+
+1. `npm install && npm run build`
+2. `config/config.example.json` → `config/config.json` の作成・編集
+3. IISサイト（`webapp/`を物理パスとするアプリケーションプール）を作成し、
+   Windows認証を有効化・匿名認証を無効化。IISが認証したアカウント名は
+   `webapp/web.config`のURL RewriteルールによりX-Remote-Userヘッダーへ書き込まれる
+   （クライアントが自称した同名ヘッダーは上書きされる）。Nodeプロセス自体は
+   既定でループバック（127.0.0.1）のみ待ち受けるため、LANからはIIS経由でしか到達できない。
+4. Windowsタスクスケジューラに、実行エンジン専用ユーザーで
+   `node engine/dist/run.js` を一定間隔（既定30分）実行するタスクを登録する
+   （`MultipleInstances=IgnoreNew`により前回実行中は次回起動をスキップ）。
 
 ## 未実装・今後の課題
 
 - GitHub Copilot CLIの実際の起動方法（`shared/src/copilotRunner.ts`は`--model`＋標準入力でプロンプトを渡す想定）は、
   導入するCLIのバージョンに合わせて調整が必要。
-- Windows統合認証はIIS側のハンドシェイクを前提としており、`webapp/src/auth.ts`は
-  転送されたユーザー名ヘッダーを読むのみ。IIS設定（URL Rewriteのアウトバウンドルール等）は別途構築が必要。
 - 画面のドラッグ&ドロップ並べ替えは、実装簡略化のため上下ボタンでの並べ替えとしている。
+- `setup.bat`・`scripts/*.ps1`・`webapp/web.config`はIIS/iisnode/タスクスケジューラの
+  公開仕様に基づいて作成しているが、実開発環境がLinuxのため実機（Windows）では未検証。
+  導入時は`docs/setup/windows-setup.md`の動作確認チェックリストを必ず一通り確認すること。

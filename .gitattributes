@@ -1,0 +1,3 @@
+# Windows向け配布物は、チェックアウト時に確実にCRLFへ変換する
+*.bat text eol=crlf
+*.ps1 text eol=crlf
