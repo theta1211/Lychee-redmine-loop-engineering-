@@ -4,13 +4,19 @@
     Web管理アプリ用のIISサイト・アプリケーションプールを構築する。
 
   .DESCRIPTION
+    Windows 11(Pro/Enterprise/Education)を対象とする。Home エディションはIIS自体が
+    提供されないため、この時点で明示的にエラーにする。
+
+    - IISに必要なWindowsのオプション機能（Windows認証を含む）を有効化
+      （Enable-WindowsOptionalFeature。Windows Serverの「役割と機能の追加」に相当する、
+      クライアントSKU向けの操作）
     - アプリケーションプール(No Managed Code / AlwaysRunning)を作成
     - IISサイトをwebapp/フォルダを物理パスとして作成
     - サイト単位でWindows認証を有効化・匿名認証を無効化
     - data/フォルダにアプリケーションプールIDの書き込み権限を付与
 
-    前提として IIS本体・iisnode・URL Rewrite モジュールが導入済みであること。
-    導入されていない場合はエラーメッセージに従ってインストールしてから再実行する。
+    iisnode・URL Rewrite モジュールはWindowsのオプション機能ではなく別配布のMSIのため、
+    このスクリプトでは自動導入しない（導入されていない場合は警告のみ表示する）。
 
   .PARAMETER Port
     サイトが待ち受けるポート番号（既定: 8080）
@@ -45,11 +51,61 @@ if (-not (Test-IsAdmin)) {
     exit 1
 }
 
+# --- Windows 11に必要なIIS関連オプション機能を有効化する ---
+# Windows ServerのInstall-WindowsFeature（ServerManagerモジュール）はクライアントSKUには
+# 存在しないため、クライアント向けのEnable-WindowsOptionalFeatureを使う。
+$requiredFeatures = @(
+    "IIS-WebServerRole",
+    "IIS-WebServer",
+    "IIS-CommonHttpFeatures",
+    "IIS-HttpErrors",
+    "IIS-StaticContent",
+    "IIS-DefaultDocument",
+    "IIS-HttpLogging",
+    "IIS-RequestFiltering",
+    "IIS-Security",
+    "IIS-WindowsAuthentication",
+    "IIS-ApplicationDevelopment",
+    "IIS-ISAPIExtensions",
+    "IIS-ISAPIFilter",
+    "IIS-ManagementConsole",
+    "IIS-ManagementScriptingTools"
+)
+
+Write-Host "--- Windowsのオプション機能(IIS)を確認しています ---"
+$missing = @()
+foreach ($feature in $requiredFeatures) {
+    $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue
+    if (-not $state) {
+        $missing += $feature
+    } elseif ($state.State -ne "Enabled") {
+        $missing += $feature
+    }
+}
+
+if ($missing.Count -gt 0) {
+    # IIS-WebServerRole自体が見つからない = このエディションにIISが存在しない
+    # (Windows 11 Home はIISを提供しない)
+    $roleAvailable = Get-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole" -ErrorAction SilentlyContinue
+    if (-not $roleAvailable) {
+        Write-Host "[エラー] このWindowsエディションにはIISが含まれていません。" -ForegroundColor Red
+        Write-Host "        Windows 11 Home はIISをサポートしません。Pro/Enterprise/Educationが必要です。" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "未有効化の機能を有効化します: $($missing -join ', ')"
+    Enable-WindowsOptionalFeature -Online -FeatureName $missing -All -NoRestart | Out-Null
+    Write-Host "IIS関連機能を有効化しました。" -ForegroundColor Green
+    Write-Host "初回導入の場合、Windowsの再起動が必要になることがあります。" -ForegroundColor Yellow
+    Write-Host "再起動が必要な場合は、再起動後にこのスクリプトを再実行してください。" -ForegroundColor Yellow
+} else {
+    Write-Host "必要なIIS機能はすべて有効化済みです。"
+}
+
 Import-Module WebAdministration -ErrorAction SilentlyContinue
 if (-not (Get-Module WebAdministration)) {
-    Write-Host "[エラー] WebAdministrationモジュールが見つかりません。" -ForegroundColor Red
-    Write-Host "        IISの役割（Webサーバー(IIS) > Webサーバー > セキュリティ > Windows認証 を含む）が" -ForegroundColor Red
-    Write-Host "        インストールされているか確認してください。" -ForegroundColor Red
+    Write-Host "[エラー] WebAdministrationモジュールを読み込めません。" -ForegroundColor Red
+    Write-Host "        直前に機能を有効化した場合はWindowsを再起動してから再実行してください。" -ForegroundColor Red
     exit 1
 }
 

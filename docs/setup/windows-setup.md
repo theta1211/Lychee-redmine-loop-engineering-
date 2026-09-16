@@ -1,12 +1,21 @@
 # Windows環境構築ガイド
 
-対象読者：この仕組みを実際にWindowsサーバー（またはタスクスケジューラが使えるWindows PC）へ
-導入する担当者。`setup.bat`と`scripts/*.ps1`で自動化できる部分と、手動でしか行えない部分を分けて説明する。
+対象読者：この仕組みを**Windows 11**のPCへ導入する担当者。開発・運用ともにWindows 11を前提とする。
+`setup.bat`と`scripts/*.ps1`で自動化できる部分と、手動でしか行えない部分を分けて説明する。
 
-> **注記**：`setup.bat`・`scripts/setup-iis.ps1`・`scripts/register-task.ps1`は、
-> IIS/iisnode/タスクスケジューラの公開されている仕様・標準的な構築手順に基づいて作成しているが、
-> 実際のWindows環境では未実行（本リポジトリの開発環境はLinuxのため）。
-> 導入時は必ず「6. 動作確認チェックリスト」を上から順に確認すること。
+> **エディションの制約**：IISはWindows 11 **Home非対応**。Pro / Enterprise / Education の
+> いずれかが必要（`winver`で確認できる）。Homeの場合はIIS自体が提供されないため、
+> このガイドのIIS部分は実施できない。
+
+> **注記**：`setup.bat`・`scripts/*.ps1`は、Windows 11のIIS/iisnode/タスクスケジューラの
+> 公開されている仕様・標準的な構築手順に基づいて作成しているが、実際のWindows 11環境では
+> 未実行（本リポジトリの開発環境はLinuxのため）。導入時は必ず「6. 動作確認チェックリスト」を
+> 上から順に確認すること。
+
+> **常時稼働させる場合の注意**：Windows 11はサーバーOSと異なり既定でスリープする。
+> このPCを常時稼働させる場合は「設定 › システム › 電源とバッテリー › 画面とスリープ」で
+> スリープを「なし」にする（ノートPCの場合は電源に接続したままにする）。
+> スリープ中はタスクスケジューラのタスクが起動しない。
 
 ## 1. 全体の流れ
 
@@ -24,26 +33,29 @@
 ⑥ 動作確認
 ```
 
-## 2. 前提ソフトウェアの導入（手動）
+## 2. 前提ソフトウェアの導入
 
-自動インストールはしない。ライセンス同意や再起動を伴うものが多く、
-無人でのサイレントインストールは事故のもとになるため。
+Windows 11のIIS機能（Windows認証を含む）は`setup.bat`の「3」（`scripts/setup-iis.ps1`）が
+自動で有効化する（Windows ServerのServer Managerに相当する操作を、クライアント向けの
+`Enable-WindowsOptionalFeature`で行っている）。それ以外は自動インストールしない。
+ライセンス同意や配布元の変更・再起動を伴うものが多く、無人でのサイレントインストールは
+事故のもとになるため。
 
 | ソフトウェア | 用途 | 入手方法 |
 |---|---|---|
-| Node.js（LTS） | Web管理アプリ・実行エンジンの実行基盤 | https://nodejs.org/ からLTS版をインストール |
-| Git for Windows | 対象リポジトリの操作 | https://git-scm.com/download/win |
+| Node.js（LTS） | Web管理アプリ・実行エンジンの実行基盤 | `winget install OpenJS.NodeJS.LTS` または https://nodejs.org/ |
+| Git for Windows | 対象リポジトリの操作 | `winget install Git.Git` または https://git-scm.com/download/win |
 | GitHub Copilot CLI | 実装・レビューAI本体 | 実行エンジン専用ユーザーでインストールし、`copilot`コマンドでログインしておく |
-| IIS（Webサーバー役割） | Web管理アプリのホスティング・Windows認証 | サーバーマネージャー › 役割と機能の追加 |
-| Windows認証（IIS機能） | IIS本体の追加機能として同時に有効化 | 役割と機能の追加ウィザード内「Webサーバー › セキュリティ › Windows認証」にチェック |
+| IIS（Webサーバー機能）・Windows認証 | Web管理アプリのホスティング・認証 | `setup.bat`の「3」が自動で有効化（Windows 11 Home非対応） |
 | iisnode | IIS上でNode.jsアプリを動かすためのモジュール | https://github.com/Azure/iisnode/releases （環境に合ったx64/x86インストーラ） |
 | URL Rewrite Module | ヘッダー注入・ルーティングに使用 | https://www.iis.net/downloads/microsoft/url-rewrite |
 
-IISの役割を追加する際は、最低限以下にチェックを入れる。
+`winget`はWindows 11に標準搭載（App Installer）。`winget --version`で確認できる。
+見つからない場合はMicrosoft Storeで「アプリ インストーラー」を更新する。
 
-- Webサーバー › アプリケーション開発 › （既定のままで可）
-- Webサーバー › セキュリティ › **Windows認証**
-- 管理ツール › IIS管理コンソール
+iisnode・URL Rewrite ModuleはWindowsのオプション機能ではなく別配布のMSIのため、
+`setup.bat`では自動導入しない。上記URLから該当バージョン（x64）をダウンロードし、
+ウィザードに従ってインストールする。
 
 ### Redmine APIキーの取得
 
@@ -90,6 +102,8 @@ powershell -ExecutionPolicy Bypass -File scripts\register-task.ps1 -TaskUser "DO
 
 ## 4. IISサイト構築（`scripts/setup-iis.ps1`）が行うこと
 
+- Windows認証を含む必要なIISオプション機能を`Enable-WindowsOptionalFeature`で有効化
+  （既に有効な場合はスキップ。**Windows 11 Homeの場合はここでエラーになる**）
 - アプリケーションプール`DevLoopAppPool`を作成（マネージドコードなし・常時実行）
 - サイト`DevLoopWebApp`を`webapp/`フォルダを物理パスとして作成
 - サイト単位でWindows認証を有効化・匿名認証を無効化
@@ -132,6 +146,8 @@ powershell -ExecutionPolicy Bypass -File scripts\register-task.ps1 -TaskUser "DO
 
 | 症状 | 原因の見当 | 対処 |
 |---|---|---|
+| `setup-iis.ps1`が「このエディションにはIISが含まれていません」と表示する | Windows 11 Home を使用している | Pro/Enterprise/Educationへのアップグレードが必要（`winver`で確認） |
+| 機能の有効化後もWebAdministrationモジュールが読み込めない | 初回のIIS導入で再起動が必要だった | Windowsを再起動してから`setup-iis.ps1`を再実行する |
 | サイトにアクセスすると401 | Windows認証が正しく有効化されていない、ブラウザ側がWindows統合認証を許可していない | IISマネージャーでサイトの「認証」を確認。ブラウザはイントラネットゾーンとして認識されているか確認 |
 | `/api/whoami`が空、または常に同じユーザーになる | `web.config`のリライトルールが適用されていない（URL Rewriteモジュール未導入等） | IISマネージャーでサイトを選び「URL 書き換え」アイコンが表示されるか確認 |
 | PUT/DELETEのAPIだけ失敗する | WebDAV Publishingが有効なまま | `web.config`のWebDAVModule除去設定を確認。サーバー全体でWebDAV機能自体を無効化してもよい |

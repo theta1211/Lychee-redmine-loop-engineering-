@@ -38,9 +38,23 @@ goto BUILD
 :BUILD
 echo.
 echo --- 前提条件の確認 ---
+where winget >nul 2>&1
+set "HAVE_WINGET=0"
+if not errorlevel 1 set "HAVE_WINGET=1"
+
 where node >nul 2>&1
 if errorlevel 1 (
-  echo [エラー] Node.jsが見つかりません。https://nodejs.org/ からLTS版をインストールしてください。
+  echo [警告] Node.jsが見つかりません。
+  if "%HAVE_WINGET%"=="1" (
+    set "ANSWER="
+    set /p ANSWER="wingetでNode.js LTSをインストールしますか？ (y/N): "
+    if /i "!ANSWER!"=="y" (
+      winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements
+      echo インストールしました。PATHを反映するため、このウィンドウを閉じて setup.bat を開き直してください。
+    )
+  ) else (
+    echo   https://nodejs.org/ からLTS版を手動でインストールしてください。
+  )
   goto AFTER_BUILD
 )
 for /f "delims=" %%v in ('node -v') do echo   Node.js : %%v
@@ -48,6 +62,16 @@ for /f "delims=" %%v in ('node -v') do echo   Node.js : %%v
 where git >nul 2>&1
 if errorlevel 1 (
   echo [警告] Gitが見つかりません。対象リポジトリの操作に必要です。
+  if "%HAVE_WINGET%"=="1" (
+    set "ANSWER="
+    set /p ANSWER="wingetでGitをインストールしますか？ (y/N): "
+    if /i "!ANSWER!"=="y" (
+      winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
+      echo インストールしました。PATHを反映するため、このウィンドウを閉じて setup.bat を開き直してください。
+    )
+  ) else (
+    echo   https://git-scm.com/download/win から手動でインストールしてください。
+  )
 ) else (
   for /f "delims=" %%v in ('git --version') do echo   Git     : %%v
 )
@@ -110,7 +134,8 @@ goto MENU
 :IIS
 echo.
 echo --- IISサイトの構築 ---
-echo ※ IIS本体・iisnode・URL Rewriteモジュールが導入済みで、
+echo ※ IIS本体・Windows認証は自動で有効化されます（Windows 11 Home非対応）。
+echo    iisnode・URL Rewriteモジュールは別途導入済みであることが必要です。
 echo    このウィンドウ自体が管理者権限で実行されている必要があります。
 if not exist "webapp\dist\server.js" (
   echo [エラー] webapp\dist\server.js が見つかりません。先に「1」でビルドしてください。
