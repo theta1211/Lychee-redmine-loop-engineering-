@@ -77,6 +77,39 @@ describe("キューAPI", () => {
     expect(deleted.status).toBe(204);
   });
 
+  it("モデルに空文字を指定した場合はnull（既定を使う）として保存される", async () => {
+    const app = createApp({ config: baseConfig(), redmineClient: fakeRedmine() });
+    const created = await request(app)
+      .post("/api/queue")
+      .set(auth)
+      .send({ redmineTicketNo: "1", implModel: "claude-sonnet", reviewModel: "gpt-4o" });
+
+    const updated = await request(app)
+      .put(`/api/queue/${created.body.id}/models`)
+      .set(auth)
+      .send({ implModel: "", reviewModel: "" });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.implModel).toBeNull();
+    expect(updated.body.reviewModel).toBeNull();
+  });
+
+  it("モデルのキーを省略した場合は既存の指定を維持する", async () => {
+    const app = createApp({ config: baseConfig(), redmineClient: fakeRedmine() });
+    const created = await request(app)
+      .post("/api/queue")
+      .set(auth)
+      .send({ redmineTicketNo: "1", implModel: "claude-sonnet", reviewModel: "gpt-4o" });
+
+    const updated = await request(app)
+      .put(`/api/queue/${created.body.id}/models`)
+      .set(auth)
+      .send({ implModel: "o4-mini" });
+
+    expect(updated.body.implModel).toBe("o4-mini");
+    expect(updated.body.reviewModel).toBe("gpt-4o");
+  });
+
   it("同じチケット番号を二重登録すると409", async () => {
     const app = createApp({ config: baseConfig(), redmineClient: fakeRedmine() });
     await request(app).post("/api/queue").set(auth).send({ redmineTicketNo: "1" });

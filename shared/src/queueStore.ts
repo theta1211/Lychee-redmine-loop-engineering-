@@ -155,6 +155,49 @@ export function pickNextWaiting(q: QueueFile): Ticket | undefined {
     .sort((a, b) => a.orderIndex - b.orderIndex)[0];
 }
 
+export type ClaimResult =
+  | { kind: "claimed"; ticket: Ticket }
+  | { kind: "busy" }
+  | { kind: "stale"; ticketId: number }
+  | { kind: "paused" }
+  | { kind: "empty" };
+
+/**
+ * 「他の実行エンジンが動いていないことの確認」と「先頭チケットの確保」を1回のロック内で行う。
+ * 確認と確保が別トランザクションだと、同時に起動した2つのエンジンが同じチケットを
+ * 二重に処理しうるため、ここで不可分に行う。
+ */
+export async function claimNextTicket(
+  dataDir: string,
+  pid: number,
+  isStale: (runner: QueueFile["runner"]) => boolean
+): Promise<ClaimResult> {
+  let result: ClaimResult = { kind: "empty" };
+  await withFileLock<QueueFile>(queuePath(dataDir), emptyQueue(), (q) => {
+    if (q.runner.ticketId != null) {
+      result = isStale(q.runner) ? { kind: "stale", ticketId: q.runner.ticketId } : { kind: "busy" };
+      return q;
+    }
+    if (q.queuePaused) {
+      result = { kind: "paused" };
+      return q;
+    }
+    const target = pickNextWaiting(q);
+    if (!target) {
+      result = { kind: "empty" };
+      return q;
+    }
+    const now = new Date().toISOString();
+    target.status = "running";
+    target.startedAt = now;
+    target.branchName = `ticket/${target.redmineTicketNo}`;
+    q.runner = { ticketId: target.id, pid, heartbeatAt: now };
+    result = { kind: "claimed", ticket: { ...target } };
+    return q;
+  });
+  return result;
+}
+
 export async function startRunning(dataDir: string, ticketId: number, pid: number): Promise<Ticket> {
   let started!: Ticket;
   await withFileLock<QueueFile>(queuePath(dataDir), emptyQueue(), (q) => {

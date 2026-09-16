@@ -1,8 +1,7 @@
 import {
   loadConfig,
   getQueue,
-  pickNextWaiting,
-  startRunning,
+  claimNextTicket,
   updateHeartbeat,
   updateTicketTitle,
   incrementRetry,
@@ -70,12 +69,32 @@ async function tryAddComment(redmine: RedmineClient, ticketNo: string, notes: st
   }
 }
 
-async function stashSafely(git: GitOps, ticketNo: string, subject: string, reason: string): Promise<void> {
+async function stashSafely(git: GitOps, message: string, reason: string): Promise<void> {
   try {
-    await git.stashAsWip(ticketNo, subject, reason);
+    await git.stashAsWip(message, reason);
   } catch {
     // 退避に失敗しても後続の状態更新・コメント登録は継続する（要確認扱いになるため調査可能）。
   }
+}
+
+function wipMessage(ticketNo: string, subject: string): string {
+  return `[WIP] #${ticketNo} ${subject}`.trimEnd();
+}
+
+/**
+ * 着手前に見つかった残留変更のコミットメッセージ。
+ * 残留物は「今から着手するチケット」ではなく「直前に処理していたチケット」の作業なので、
+ * 現在のブランチ名からチケット番号を復元する。
+ */
+async function residueWipMessage(git: GitOps): Promise<string> {
+  let branch = "";
+  try {
+    branch = await git.currentBranch();
+  } catch {
+    branch = "";
+  }
+  const ticketNo = branch.match(/^ticket\/(\d+)$/)?.[1];
+  return ticketNo ? wipMessage(ticketNo, "(前回処理の残留変更)") : `[WIP] 前回処理の残留変更 (${branch || "unknown"})`;
 }
 
 export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
@@ -86,27 +105,20 @@ export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
   const copilot = deps.copilot ?? createCopilotRunner(config.copilot);
   const pid = deps.pid ?? process.pid;
 
-  // 1. 多重起動防止・異常終了検知
-  const q = await getQueue(dataDir);
-  if (q.runner.ticketId != null) {
-    if (!isRunnerStale(q.runner, config.runner.staleThresholdMinutes)) {
-      return { outcome: "busy_running_elsewhere" };
-    }
-    return recoverFromCrash(dataDir, git, redmine, q.runner.ticketId);
-  }
+  // 1-3. 多重起動防止・異常終了検知・チケットの確保を1回のロック内で行う
+  const claim = await claimNextTicket(dataDir, pid, (runner) =>
+    isRunnerStale(runner, config.runner.staleThresholdMinutes)
+  );
+  if (claim.kind === "busy") return { outcome: "busy_running_elsewhere" };
+  if (claim.kind === "stale") return recoverFromCrash(dataDir, git, redmine, claim.ticketId);
+  if (claim.kind === "paused") return { outcome: "idle_paused" };
+  if (claim.kind === "empty") return { outcome: "idle_empty" };
+  const ticket = claim.ticket;
 
-  // 2. 一時停止確認
-  if (q.queuePaused) return { outcome: "idle_paused" };
+  // 4. 作業ツリーに前回処理の残留物があれば退避する。
+  //    退避先は現在チェックアウト中のブランチなので、コミットメッセージもそのブランチ基準で作る。
+  await stashSafely(git, await residueWipMessage(git), "前回処理の残留物を退避");
 
-  // 3. 次のチケットを取得
-  const ticket = pickNextWaiting(q);
-  if (!ticket) return { outcome: "idle_empty" };
-
-  // 4. 作業ツリーが汚れていれば保険として退避
-  await stashSafely(git, ticket.redmineTicketNo, ticket.title ?? "", "前回処理の残留物を退避");
-
-  // 5. running へ更新・runner セット
-  await startRunning(dataDir, ticket.id, pid);
   const branchName = `ticket/${ticket.redmineTicketNo}`;
   const settings = await getSettings(dataDir);
   const implModel = ticket.implModel ?? settings.defaultImplModel;
@@ -115,7 +127,12 @@ export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
   let heartbeatTimer: NodeJS.Timeout | undefined;
   const startHeartbeat = () => {
     heartbeatTimer = setInterval(() => {
-      void updateHeartbeat(dataDir, ticket.id);
+      // 失敗を握りつぶさずに捕捉する。未処理のPromise拒否はNodeの既定ではプロセス停止になり、
+      // 実装作業中のエンジンが落ちてしまうため。
+      updateHeartbeat(dataDir, ticket.id).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[devloop-engine] ハートビートの更新に失敗しました", err);
+      });
     }, config.runner.heartbeatIntervalSeconds * 1000);
   };
   const stopHeartbeat = () => {
@@ -151,6 +168,17 @@ export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
       let reviewFeedback: string | undefined;
       const retryLimit = settings.retryLimit;
 
+      /** 差し戻して再実装させる。上限に達した場合は終了結果を返す */
+      const requestRetry = async (feedback: string): Promise<RunOnceResult | undefined> => {
+        const retryCount = await incrementRetry(dataDir, ticket.id);
+        if (retryCount > retryLimit) {
+          return handleRetryLimitExceeded(dataDir, git, redmine, ticket.id, issue);
+        }
+        await appendLog(dataDir, ticket.id, "retry", `retryCount ${retryCount}/${retryLimit}。指摘内容を実装AIへ渡します。`);
+        reviewFeedback = feedback;
+        return undefined;
+      };
+
       for (;;) {
         if (await shouldAbort()) return handleAbort(dataDir, git, ticket.id);
 
@@ -168,6 +196,17 @@ export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
 
         if (await shouldAbort()) return handleAbort(dataDir, git, ticket.id);
 
+        // 実装AIが何も変更しなかった場合は、レビューへ進めず差し戻して作り直させる
+        if (await git.isClean()) {
+          const message = "実装AIが変更を生成しませんでした。";
+          await appendLog(dataDir, ticket.id, "review", message);
+          const limitReached = await requestRetry(
+            `${message}\nチケットの内容にもとづき、実際にファイルを変更してください。`
+          );
+          if (limitReached) return limitReached;
+          continue;
+        }
+
         const diffSummary = await git.diffSummary();
         const reviewResult = await copilot.run({
           model: reviewModel,
@@ -183,12 +222,8 @@ export async function runOnce(deps: RunOnceDeps = {}): Promise<RunOnceResult> {
 
         if (parseReviewVerdict(reviewResult.output) === "pass") break;
 
-        const retryCount = await incrementRetry(dataDir, ticket.id);
-        if (retryCount > retryLimit) {
-          return handleRetryLimitExceeded(dataDir, git, redmine, ticket.id, issue);
-        }
-        await appendLog(dataDir, ticket.id, "retry", `retryCount ${retryCount}/${retryLimit}。指摘内容を実装AIへ渡します。`);
-        reviewFeedback = reviewResult.output;
+        const limitReached = await requestRetry(reviewResult.output);
+        if (limitReached) return limitReached;
       }
 
       const committed = await git.commitAll(ticket.redmineTicketNo, issue.subject);
@@ -233,7 +268,7 @@ async function recoverFromCrash(
   const ticket = q.items.find((t) => t.id === ticketId);
   const reason = "実行エンジンの異常終了により処理が中断しました。要確認をお願いします。";
   if (ticket) {
-    await stashSafely(git, ticket.redmineTicketNo, ticket.title ?? "", reason);
+    await stashSafely(git, wipMessage(ticket.redmineTicketNo, ticket.title ?? ""), reason);
     await tryAddComment(redmine, ticket.redmineTicketNo, reason);
   }
   await appendLog(dataDir, ticketId, "recover", reason);
@@ -244,7 +279,11 @@ async function recoverFromCrash(
 async function handleAbort(dataDir: string, git: GitOps, ticketId: number): Promise<RunOnceResult> {
   const q = await getQueue(dataDir);
   const ticket = q.items.find((t) => t.id === ticketId);
-  await stashSafely(git, ticket?.redmineTicketNo ?? String(ticketId), ticket?.title ?? "", "利用者の操作により中断");
+  await stashSafely(
+    git,
+    wipMessage(ticket?.redmineTicketNo ?? String(ticketId), ticket?.title ?? ""),
+    "利用者の操作により中断"
+  );
   await appendLog(dataDir, ticketId, "abort", "中断要求を検知し、処理を停止しました。作業内容はWIPコミットとして退避しました。");
   await finishTicket(dataDir, ticketId, "canceled", "利用者の操作により中断しました");
   return { outcome: "canceled", ticketId };
@@ -259,7 +298,7 @@ async function handleTimeout(
   phaseLabel: string
 ): Promise<RunOnceResult> {
   const message = `${phaseLabel}がタイムアウトしました。`;
-  await stashSafely(git, issue.id, issue.subject, message);
+  await stashSafely(git, wipMessage(issue.id, issue.subject), message);
   await appendLog(dataDir, ticketId, "timeout", message);
   await tryAddComment(redmine, issue.id, `${message}要確認をお願いします。`);
   await finishTicket(dataDir, ticketId, "needs_human", message);
@@ -276,7 +315,7 @@ async function handleUnexpectedError(
   error: unknown
 ): Promise<RunOnceResult> {
   const message = `予期しないエラーが発生しました: ${(error as Error).message}`;
-  await stashSafely(git, ticketNo, subject, message);
+  await stashSafely(git, wipMessage(ticketNo, subject), message);
   await appendLog(dataDir, ticketId, "error", message);
   await tryAddComment(redmine, ticketNo, `${message}\n要確認（人対応）をお願いします。`);
   await finishTicket(dataDir, ticketId, "needs_human", message);
@@ -291,7 +330,7 @@ async function handleRetryLimitExceeded(
   issue: RedmineIssue
 ): Promise<RunOnceResult> {
   const message = "再実装ループが上限に達しました。";
-  await stashSafely(git, issue.id, issue.subject, message);
+  await stashSafely(git, wipMessage(issue.id, issue.subject), message);
   await appendLog(dataDir, ticketId, "error", message);
   await tryAddComment(redmine, issue.id, `${message}要確認（人対応）をお願いします。`);
   await finishTicket(dataDir, ticketId, "needs_human", message);

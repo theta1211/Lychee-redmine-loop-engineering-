@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   addTicket,
+  claimNextTicket,
   getQueue,
   updateOrder,
   updateModels,
@@ -133,5 +134,62 @@ describe("queueStore", () => {
 
   it("存在しないチケットの操作はTICKET_NOT_FOUND", async () => {
     await expect(updateOrder(dataDir, 9999, 0)).rejects.toBeInstanceOf(AppError);
+  });
+});
+
+describe("claimNextTicket", () => {
+  const neverStale = () => false;
+
+  it("先頭のwaitingチケットをrunningにして確保する", async () => {
+    const a = await addTicket(dataDir, { redmineTicketNo: "1", title: "A", registeredBy: "u1" });
+    await addTicket(dataDir, { redmineTicketNo: "2", title: "B", registeredBy: "u1" });
+
+    const claim = await claimNextTicket(dataDir, 4242, neverStale);
+
+    expect(claim).toMatchObject({ kind: "claimed" });
+    expect((claim as { ticket: { id: number } }).ticket.id).toBe(a.id);
+    const q = await getQueue(dataDir);
+    expect(q.items[0].status).toBe("running");
+    expect(q.items[0].branchName).toBe("ticket/1");
+    expect(q.runner).toMatchObject({ ticketId: a.id, pid: 4242 });
+  });
+
+  it("実行中(非stale)ならbusyを返し、キューを書き換えない", async () => {
+    const a = await addTicket(dataDir, { redmineTicketNo: "1", title: "A", registeredBy: "u1" });
+    await claimNextTicket(dataDir, 1111, neverStale);
+    await addTicket(dataDir, { redmineTicketNo: "2", title: "B", registeredBy: "u1" });
+
+    expect(await claimNextTicket(dataDir, 2222, neverStale)).toEqual({ kind: "busy" });
+    const q = await getQueue(dataDir);
+    expect(q.runner.pid).toBe(1111);
+    expect(q.items.find((t) => t.redmineTicketNo === "2")?.status).toBe("waiting");
+    void a;
+  });
+
+  it("staleと判定されたらstaleを返す", async () => {
+    const a = await addTicket(dataDir, { redmineTicketNo: "1", title: "A", registeredBy: "u1" });
+    await claimNextTicket(dataDir, 1111, () => false);
+    expect(await claimNextTicket(dataDir, 2222, () => true)).toEqual({ kind: "stale", ticketId: a.id });
+  });
+
+  it("一時停止中はpaused、待機チケットがなければempty", async () => {
+    expect(await claimNextTicket(dataDir, 1, neverStale)).toEqual({ kind: "empty" });
+    await addTicket(dataDir, { redmineTicketNo: "1", title: "A", registeredBy: "u1" });
+    await setPaused(dataDir, true);
+    expect(await claimNextTicket(dataDir, 1, neverStale)).toEqual({ kind: "paused" });
+  });
+
+  it("同時に複数のエンジンが確保しようとしても1つしか成功しない", async () => {
+    await addTicket(dataDir, { redmineTicketNo: "1", title: "A", registeredBy: "u1" });
+    await addTicket(dataDir, { redmineTicketNo: "2", title: "B", registeredBy: "u1" });
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => claimNextTicket(dataDir, 1000 + i, neverStale))
+    );
+
+    expect(results.filter((r) => r.kind === "claimed")).toHaveLength(1);
+    expect(results.filter((r) => r.kind === "busy")).toHaveLength(4);
+    const q = await getQueue(dataDir);
+    expect(q.items.filter((t) => t.status === "running")).toHaveLength(1);
   });
 });

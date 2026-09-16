@@ -7,6 +7,9 @@ import type { Request, Response, NextFunction } from "express";
  * 転送する構成とする（詳細はdocs/design配下の運用手順を参照）。
  *
  * ローカル開発時はヘッダーの代わりに環境変数 DEVLOOP_DEV_USER で代用できる。
+ *
+ * 注意: このヘッダーは自己申告なので、IIS側で必ず上書き（クライアント由来の値を破棄）すること。
+ * またNodeプロセスはループバックのみで待ち受け、LANから直接到達できないようにする（server.ts参照）。
  */
 export function resolveUser(req: Request): string | undefined {
   const header = req.header("x-remote-user");

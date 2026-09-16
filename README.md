@@ -66,7 +66,7 @@ Windows認証の代わりに環境変数でユーザーを指定して動かせ�
 ```bash
 # Web管理アプリ
 DEVLOOP_DEV_USER='DOMAIN\devuser' npm run start:webapp
-# → http://localhost:3000 （PORT環境変数で変更可）
+# → http://127.0.0.1:3000 （PORT/HOST環境変数で変更可）
 
 # 実行エンジンを1回だけ手動実行
 npm run run:engine
@@ -89,7 +89,9 @@ npm run typecheck
 2. `npm install && npm run build` で `webapp/dist` `engine/dist` `shared/dist` を生成する。
 3. IISでWeb管理アプリをホストし、Windows認証を有効化する。IISのURL Rewrite等で
    認証済みユーザー名を `X-Remote-User` ヘッダーとしてアプリへ転送するよう構成する
-   （`webapp/src/auth.ts` 参照）。
+   （`webapp/src/auth.ts` 参照）。このヘッダーは自己申告なので、**クライアントが送ってきた
+   同名ヘッダーは必ずIIS側で破棄・上書きする**こと。Nodeプロセスは既定でループバック
+   （127.0.0.1）のみ待ち受けるため、LANからはIIS経由でしか到達できない。
 4. Windowsタスクスケジューラに、手順1のユーザーで `node engine/dist/run.js` を
    一定間隔（既定30分）で実行するタスクを登録する。実行時は`DEVLOOP_CONFIG_PATH`環境変数
    （未設定時は`config/config.json`）で設定ファイルの場所を指定できる。
@@ -97,7 +99,7 @@ npm run typecheck
 
 ## 未実装・今後の課題
 
-- GitHub Copilot CLIの実際の起動オプション（`shared/src/copilotRunner.ts`の`--model`/`--prompt`は仮）は、
+- GitHub Copilot CLIの実際の起動方法（`shared/src/copilotRunner.ts`は`--model`＋標準入力でプロンプトを渡す想定）は、
   導入するCLIのバージョンに合わせて調整が必要。
 - Windows統合認証はIIS側のハンドシェイクを前提としており、`webapp/src/auth.ts`は
   転送されたユーザー名ヘッダーを読むのみ。IIS設定（URL Rewriteのアウトバウンドルール等）は別途構築が必要。

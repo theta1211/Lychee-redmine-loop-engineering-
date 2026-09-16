@@ -33,8 +33,15 @@ export function createCopilotRunner(config: AppConfig["copilot"]) {
 
 function runReal(config: AppConfig["copilot"], opts: CopilotRunOptions): Promise<CopilotRunResult> {
   return new Promise((resolve, reject) => {
-    const args = [...config.extraArgs, "--model", opts.model, "--prompt", opts.prompt];
+    // プロンプトはコマンドライン引数ではなく標準入力から渡す。
+    // チケット本文やレビュー指摘を丸ごと含むため、Windowsの引数長制限・
+    // 改行やクォートのエスケープで壊れるのを避ける。
+    const args = [...config.extraArgs, "--model", opts.model];
     const child: ChildProcess = spawn(config.command, args, { cwd: opts.cwd });
+    child.stdin?.on("error", () => {
+      // 子プロセスが先に終了した場合のEPIPEは無視する（終了コードとして扱う）
+    });
+    child.stdin?.end(opts.prompt);
 
     let output = "";
     let settled = false;
@@ -58,12 +65,18 @@ function runReal(config: AppConfig["copilot"], opts: CopilotRunOptions): Promise
 
     if (opts.shouldAbort) {
       const interval = opts.abortPollIntervalMs ?? 5000;
-      abortTimer = setInterval(async () => {
+      abortTimer = setInterval(() => {
         if (settled) return;
-        if (await opts.shouldAbort!()) {
-          child.kill("SIGTERM");
-          finish({ output, timedOut: false, aborted: true, exitCode: null });
-        }
+        void (async () => {
+          try {
+            if (await opts.shouldAbort!()) {
+              child.kill("SIGTERM");
+              finish({ output, timedOut: false, aborted: true, exitCode: null });
+            }
+          } catch {
+            // 中断要求の確認に失敗しても実行は継続する（次回のポーリングで再確認する）
+          }
+        })();
       }, interval);
     }
 

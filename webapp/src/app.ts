@@ -50,6 +50,15 @@ function validateModel(name: unknown): void {
   }
 }
 
+/**
+ * 未指定（空文字）は「デフォルトを使う」を意味するnullへ寄せる。
+ * キー自体が無い場合のundefinedは「変更しない」として保持する。
+ */
+function normalizeModel(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  return (value as string) || null;
+}
+
 function settingsResponse(settings: Awaited<ReturnType<typeof getSettings>>, config: AppConfig) {
   return {
     ...settings,
@@ -132,7 +141,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
       const { implModel, reviewModel } = req.body ?? {};
       validateModel(implModel);
       validateModel(reviewModel);
-      const ticket = await updateModels(dataDir, id, { implModel, reviewModel });
+      const ticket = await updateModels(dataDir, id, {
+        implModel: normalizeModel(implModel),
+        reviewModel: normalizeModel(reviewModel),
+      });
       res.json(ticket);
     } catch (err) {
       sendError(res, err);

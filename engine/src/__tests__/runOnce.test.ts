@@ -52,34 +52,58 @@ function fakeRedmine(overrides: Partial<RedmineClient> = {}): RedmineClient & { 
   };
 }
 
-function fakeGit(overrides: Partial<GitOps> = {}) {
-  const calls: { ensureBranch: string[]; stashAsWip: Array<{ no: string; reason: string }>; commitAll: string[]; push: string[] } = {
-    ensureBranch: [],
-    stashAsWip: [],
-    commitAll: [],
-    push: [],
-  };
-  const git: GitOps & { calls: typeof calls } = {
-    isClean: async () => true,
-    stashAsWip: async (no: string, _subject: string, reason: string) => {
-      calls.stashAsWip.push({ no, reason });
+interface FakeGitOptions {
+  /** 着手時点で作業ツリーが汚れている状態から始める（前回処理の残留物を模す） */
+  startDirty?: boolean;
+  /** currentBranch()が返すブランチ名 */
+  branch?: string;
+  overrides?: Partial<GitOps>;
+}
+
+/**
+ * 実際のgitOpsの契約に合わせたフェイク。
+ * stashAsWip/commitAllは「作業ツリーがクリーンなら何もしない」挙動まで模倣する。
+ */
+function fakeGit(options: FakeGitOptions = {}) {
+  const calls: {
+    ensureBranch: string[];
+    stashAsWip: Array<{ message: string; reason: string }>;
+    commitAll: string[];
+    push: string[];
+  } = { ensureBranch: [], stashAsWip: [], commitAll: [], push: [] };
+
+  let clean = !options.startDirty;
+
+  const git = {
+    isClean: async () => clean,
+    currentBranch: async () => options.branch ?? "main",
+    stashAsWip: async (message: string, reason: string) => {
+      if (clean) return false;
+      calls.stashAsWip.push({ message, reason });
+      clean = true;
       return true;
     },
     ensureBranch: async (branch: string) => {
       calls.ensureBranch.push(branch);
     },
     commitAll: async (no: string) => {
+      if (clean) return false;
       calls.commitAll.push(no);
+      clean = true;
       return true;
     },
     push: async (branch: string) => {
       calls.push.push(branch);
     },
-    diffSummary: async () => "+1 -0 file.txt",
+    diffSummary: async () => "diff --git a/file.ts b/file.ts\n+追加行",
     calls,
-    ...overrides,
+    /** 実装AIがファイルを変更したことを模す */
+    markChanged: () => {
+      clean = false;
+    },
+    ...options.overrides,
   };
-  return git;
+  return git as GitOps & typeof git;
 }
 
 function scriptedCopilot(
@@ -129,7 +153,8 @@ describe("runOnce: 起動条件", () => {
     await startRunning(dataDir, t.id, deadPid);
 
     const redmine = fakeRedmine();
-    const git = fakeGit();
+    // 異常終了したエンジンは作業ツリーに未コミット変更を残している
+    const git = fakeGit({ startDirty: true, branch: "ticket/1" });
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot: scriptedCopilot(() => ({})) });
 
     expect(result).toEqual({ outcome: "recovered_crash", ticketId: t.id });
@@ -146,7 +171,13 @@ describe("runOnce: 正常系・差し戻し・上限到達", () => {
     const t = await addTicket(dataDir, { redmineTicketNo: "42", title: null, registeredBy: "u1" });
     const redmine = fakeRedmine();
     const git = fakeGit();
-    const copilot = scriptedCopilot((_opts, i) => (i === 0 ? { output: "実装しました" } : { output: "RESULT: PASS 問題ありません" }));
+    const copilot = scriptedCopilot((_opts, i) => {
+      if (i === 0) {
+        git.markChanged();
+        return { output: "実装しました" };
+      }
+      return { output: "RESULT: PASS 問題ありません" };
+    });
 
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
 
@@ -166,15 +197,24 @@ describe("runOnce: 正常系・差し戻し・上限到達", () => {
     expect(logs.map((l) => l.phase)).toEqual(["implement", "review", "push", "push", "push"]);
   });
 
-  it("既存の作業ツリーの残留物は着手前に退避されてから実装に進む", async () => {
-    const t = await addTicket(dataDir, { redmineTicketNo: "45", title: null, registeredBy: "u1" });
+  it("着手前の残留物は、今回のチケットではなく残留元ブランチの番号で退避される", async () => {
+    await addTicket(dataDir, { redmineTicketNo: "45", title: null, registeredBy: "u1" });
     const redmine = fakeRedmine();
-    const git = fakeGit();
-    const copilot = scriptedCopilot((_opts, i) => (i === 0 ? { output: "実装しました" } : { output: "RESULT: PASS" }));
+    // 直前に #99 を処理していた状態（ブランチticket/99に未コミット変更が残っている）
+    const git = fakeGit({ startDirty: true, branch: "ticket/99" });
+    const copilot = scriptedCopilot((_opts, i) => {
+      if (i === 0) {
+        git.markChanged();
+        return { output: "実装しました" };
+      }
+      return { output: "RESULT: PASS" };
+    });
 
     await runOnce({ config: baseConfig(), redmine, git, copilot });
 
     expect(git.calls.stashAsWip[0].reason).toContain("残留物");
+    expect(git.calls.stashAsWip[0].message).toContain("#99");
+    expect(git.calls.stashAsWip[0].message).not.toContain("#45");
   });
 
   it("レビューNG→差し戻し再実装→PASSで完了する", async () => {
@@ -182,9 +222,15 @@ describe("runOnce: 正常系・差し戻し・上限到達", () => {
     const redmine = fakeRedmine();
     const git = fakeGit();
     const copilot = scriptedCopilot((_opts, i) => {
-      if (i === 0) return { output: "実装1回目" };
+      if (i === 0) {
+        git.markChanged();
+        return { output: "実装1回目" };
+      }
       if (i === 1) return { output: "RESULT: FAIL 直してください" };
-      if (i === 2) return { output: "実装2回目" };
+      if (i === 2) {
+        git.markChanged();
+        return { output: "実装2回目" };
+      }
       return { output: "RESULT: PASS" };
     });
 
@@ -202,7 +248,13 @@ describe("runOnce: 正常系・差し戻し・上限到達", () => {
     await updateSettings(dataDir, { retryLimit: 1 });
     const redmine = fakeRedmine();
     const git = fakeGit();
-    const copilot = scriptedCopilot((_opts, i) => (i % 2 === 0 ? { output: "実装" } : { output: "RESULT: FAIL 何度も直りません" }));
+    const copilot = scriptedCopilot((_opts, i) => {
+      if (i % 2 === 0) {
+        git.markChanged();
+        return { output: "実装" };
+      }
+      return { output: "RESULT: FAIL 何度も直りません" };
+    });
 
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
 
@@ -217,12 +269,61 @@ describe("runOnce: 正常系・差し戻し・上限到達", () => {
   });
 });
 
+describe("runOnce: 実装AIが変更を作らなかった場合", () => {
+  it("レビューへ進まず差し戻し、変更が出れば通常どおり完了する", async () => {
+    const t = await addTicket(dataDir, { redmineTicketNo: "80", title: null, registeredBy: "u1" });
+    const redmine = fakeRedmine();
+    const git = fakeGit();
+    const prompts: string[] = [];
+    const copilot = scriptedCopilot((opts, i) => {
+      prompts.push(opts.prompt);
+      if (i === 0) return { output: "(何も変更していません)" }; // 1回目の実装: 変更なし
+      if (i === 1) {
+        git.markChanged(); // 2回目の実装: 変更あり
+        return { output: "実装しました" };
+      }
+      return { output: "RESULT: PASS" };
+    });
+
+    const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
+
+    expect(result).toEqual({ outcome: "pushed", ticketId: t.id });
+    // 実装2回・レビュー1回。変更のない1回目ではレビューAIを起動していない
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain("実際にファイルを変更してください");
+    expect(prompts[2]).toContain("レビュー");
+    const q = await getQueue(dataDir);
+    expect(q.items[0].retryCount).toBe(1);
+    const logs = await readLogs(dataDir, t.id);
+    expect(logs.some((l) => l.content.includes("変更を生成しませんでした"))).toBe(true);
+  });
+
+  it("変更を作らないまま上限に達したらneeds_humanになり、プッシュしない", async () => {
+    const t = await addTicket(dataDir, { redmineTicketNo: "81", title: null, registeredBy: "u1" });
+    await updateSettings(dataDir, { retryLimit: 1 });
+    const redmine = fakeRedmine();
+    const git = fakeGit();
+    const copilot = scriptedCopilot(() => ({ output: "(何もしませんでした)" }));
+
+    const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
+
+    expect(result).toMatchObject({ outcome: "needs_human", ticketId: t.id });
+    expect(git.calls.push).toHaveLength(0);
+    expect(git.calls.commitAll).toHaveLength(0);
+    const q = await getQueue(dataDir);
+    expect(q.items[0].status).toBe("needs_human");
+  });
+});
+
 describe("runOnce: タイムアウト・中断", () => {
   it("実装フェーズがタイムアウトしたらneeds_humanになる", async () => {
     const t = await addTicket(dataDir, { redmineTicketNo: "50", title: null, registeredBy: "u1" });
     const redmine = fakeRedmine();
     const git = fakeGit();
-    const copilot = scriptedCopilot(() => ({ timedOut: true }));
+    const copilot = scriptedCopilot(() => {
+      git.markChanged();
+      return { timedOut: true };
+    });
 
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
 
@@ -236,7 +337,10 @@ describe("runOnce: タイムアウト・中断", () => {
     const t = await addTicket(dataDir, { redmineTicketNo: "51", title: null, registeredBy: "u1" });
     const redmine = fakeRedmine();
     const git = fakeGit();
-    const copilot = scriptedCopilot(() => ({ aborted: true }));
+    const copilot = scriptedCopilot(() => {
+      git.markChanged();
+      return { aborted: true };
+    });
 
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot });
 
@@ -253,6 +357,7 @@ describe("runOnce: タイムアウト・中断", () => {
     let reviewCalled = false;
     const copilot = scriptedCopilot(async (_opts, i) => {
       if (i === 0) {
+        git.markChanged();
         await requestAbort(dataDir, t.id);
         return { output: "実装完了" };
       }
@@ -304,8 +409,10 @@ describe("runOnce: 予期しないエラー", () => {
     const t = await addTicket(dataDir, { redmineTicketNo: "70", title: null, registeredBy: "u1" });
     const redmine = fakeRedmine();
     const git = fakeGit({
-      ensureBranch: async () => {
-        throw new Error("disk full");
+      overrides: {
+        ensureBranch: async () => {
+          throw new Error("disk full");
+        },
       },
     });
     const result = await runOnce({ config: baseConfig(), redmine, git, copilot: scriptedCopilot(() => ({})) });
